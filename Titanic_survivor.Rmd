@@ -1,0 +1,381 @@
+---
+title: "Titanic Data Set - Survivor Predictor"
+author: "GiriPrasath V"
+date: "April 20, 2018"
+output: html_document
+---
+
+## Use Case: 
+Let us take the Titanic Data set and build a model which will predict the survival probability - whether or not a passenger would have survived if travelled on Titanic.
+This can be a prototype to predict accident probability / Air crash Probability predictor and many other such use cases.
+
+## Data Set:
+Titanic data set contains various data points about each passenger who was onboard in the Titanic Ship. The data set aslo contains whether the passenger survived the crash or not.
+
+## Step 1: Import Data
+
+Import Data
+
+```{r}
+df.train <- read.csv('C:\\Users\\uia94128\\Desktop\\MFoi\\Day4\\Titanic\\titanic_train.csv')
+head(df.train)
+```
+
+Exploratory Data Analysis (EDA)
+
+Let us explore how much missing data we have, we can use the Amelia pacakge for this. (Install)
+
+```{r}
+#install.packages("Amelia")
+library(Amelia)
+missmap(df.train, main="Titanic Training Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+```
+
+Roughly 40 percent of the Age data is missing.
+We shall come up with a way to fil this missing data.
+
+**Bold** Data Visualization **Bold**
+
+Survivors Histogram
+
+```{r}
+library(ggplot2)
+ggplot(df.train,aes(Survived)) + geom_bar()
+```
+
+Passengers Count Class wise Distribution
+
+```{r}
+ggplot(df.train,aes(Pclass)) + geom_bar(aes(fill=factor(Pclass)),alpha=0.5)
+```
+
+
+Gender Distribution
+
+```{r}
+ggplot(df.train,aes(Sex)) + geom_bar(aes(fill=factor(Sex)),alpha=0.5)
+```
+
+
+**Bold** Data Cleaning **Bold**
+
+We want to fill in missing age data instead of just dropping the missing age data rows. 
+
+One way to do this is by filling in the mean age of all the passengers (imputation).
+
+The other way is to see if there is a pattern relationship between any other column and age. Fill the age accordingly.
+
+```{r}
+pl <- ggplot(df.train,aes(Pclass,Age)) + geom_boxplot(aes(group=Pclass,fill=factor(Pclass),alpha=0.4)) 
+pl + scale_y_continuous(breaks = seq(min(0), max(80), by = 2))
+```
+
+We shall use these average age values to impute based on Pclass for Age.
+Because we see that avg age is different for each class.
+
+```{r}
+impute_age <- function(age,class){
+    out <- age
+    for (i in 1:length(age)){
+        
+        if (is.na(age[i])){
+
+            if (class[i] == 1){
+                out[i] <- 37
+
+            }else if (class[i] == 2){
+                out[i] <- 29
+
+            }else{
+                out[i] <- 24
+            }
+        }else{
+            out[i]<-age[i]
+        }
+    }
+    return(out)
+}
+```
+
+```{r}
+fixed.ages <- impute_age(df.train$Age,df.train$Pclass)
+df.train$Age <- fixed.ages
+missmap(df.train, main="Titanic Training Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+```
+
+Now there is no missing values in  the data set.
+
+
+Rather than using all the columns to build the model, let us use specific columns as input signals for the model.
+
+```{r}
+
+df.train <- df.train[,!(colnames(df.train) %in% c('PassengerId','Name','Ticket','Cabin'))]
+```
+
+**Bold** Train and Test Data fit: **Bold**
+
+```{r}
+library(caTools)
+set.seed(101)
+
+split = sample.split(df.train$Survived, SplitRatio = 0.70)
+
+final.train = subset(df.train, split == TRUE)
+final.test = subset(df.train, split == FALSE)
+```
+
+
+
+## Logistic Regression Classifier
+
+Let us build the first classifier model using the Logistic Regression Algorithm.
+The function for Logistic Regression model is glm().
+Three parameters to be passed:
+
+Building the Model:
+
+```{r}
+log.model <- glm(formula=Survived ~ . , family = binomial(link='logit'),data = final.train)
+```
+
+Prediction for test data:
+
+```{r}
+fitted.probabilities <- predict(log.model,newdata=final.test,type='response')
+```
+
+Accuracy Measurement:
+
+```{r}
+fitted.results <- ifelse(fitted.probabilities > 0.5,1,0)
+misClasificError <- mean(fitted.results != final.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+The LR Classifier Model we have built is **Bold** 78.4 % **Bold**  accurate in predicting if a new passenger will survive the journey on Titanic.
+
+## Decision Tree Model
+
+Let us now build the next classifier using Decision Trees algorithm
+**bold** Library : rpart library **bold**
+
+```{r}
+library(rpart)
+tree <- rpart(Survived ~.,method='class',data = final.train)
+```
+
+Test the Model: Use predict() to predict the Purchase value on the test data.
+
+```{r}
+tree.preds <- predict(tree,final.test)
+```
+
+Check the Head of the predicted values. You should notice that you actually have two columns with the probabilities.
+
+```{r}
+head(tree.preds)
+```
+
+Write a simple R Function to convert these two columns into one column to match the original "1/0" Label for the Purchase column.
+
+```{r}
+tree.preds <- as.data.frame(tree.preds)
+joiner <- function(x){
+    if (x>=0.5){
+        return('1')
+    }else{
+        return("0")
+    }
+}
+```
+
+Apply that function to each of the row in the prediction result
+
+```{r}
+tree.preds$Survival <- sapply(tree.preds$'1',joiner)
+```
+
+```{r}
+head(tree.preds)
+```
+
+Calculate the accuracy By comparing the prediction result with the actual result in Car.test
+
+```{r}
+misClasificError <- mean(tree.preds$Survival != final.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+
+The Decision Tree Classifier Model we have built is **Bold** 81.3 % **Bold**  accurate in predicting if a new passenger will survive the journey.
+
+
+## Random Forest Classifier
+
+Let us now try to build a Random forest classifier.
+**bold** Library: randonForest() **bold**
+
+```{r message=FALSE}
+library(randomForest)
+```
+
+Build The Model using Train Data:
+
+```{r}
+rf.model <- randomForest(Survived ~ . , data = final.train)
+```
+
+Test the Model using the Test Data.
+Print the confusion Matrix for the prediction Vs actual
+
+```{r}
+p <- predict(rf.model,final.test)
+
+joiner <- function(x){
+    if (x>=0.5){
+        return('1')
+    }else{
+        return("0")
+    }
+}
+p<- sapply(p,joiner)
+
+
+table(p,final.test$Survived)
+```
+
+Calculate the accuracy:
+
+```{r}
+misClasificError <- mean(p != final.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+
+The Random forest Classifier Model we have built is 83.5 % accurate in predicting if a passenger will survive the travel or not.
+
+## KNN Algorithm Classifier
+
+Let us now build the classifier using KNN Algorithm.
+
+**bold** Data needs to be scaled before we pass it on to building the KNN model **bold**
+
+```{r}
+# Standarize the dataset using "scale()" R function
+standardized.titanic <- scale(df.train[,!(colnames(df.train) %in% c('Sex','Survived','Embarked'))])
+standardized.titanic <- data.frame(standardized.titanic)
+```
+
+Add the purchase column to the standardized data frame
+
+```{r}
+standardized.titanic$Survived <- df.train$Survived
+head(standardized.titanic)
+```
+
+Train & Test Data Split from the scaled data
+
+```{r}
+library(caTools)
+set.seed(101)
+
+split = sample.split(standardized.titanic$Survived, SplitRatio = 0.70)
+
+titanic.train = subset(standardized.titanic, split == TRUE)
+titanic.test = subset(standardized.titanic, split == FALSE)
+```
+
+Build the Model
+**bold** Function : knn() **bold**
+
+```{r}
+
+library(class)
+predicted.Survived <- knn(titanic.train[,!(colnames(titanic.train) %in% c('Survived'))],titanic.test[,!(colnames(titanic.test) %in% c('Survived'))],titanic.train$Survived,k=1)
+head(predicted.Survived)
+```
+
+Check The Accuracy of the Model:
+
+```{r}
+misClasificError <- mean(predicted.Survived != titanic.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+
+Now Let us try with k=3, considering 3 neighbors to predict the result:
+
+```{r}
+library(class)
+predicted.Survived <- knn(titanic.train[,!(colnames(titanic.train) %in% c('Survived'))],titanic.test[,!(colnames(titanic.test) %in% c('Survived'))],titanic.train$Survived,k=3)
+misClasificError <- mean(predicted.Survived != titanic.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+
+```
+
+Now Let us try with k=3, considering 5 neighbors to predict the result:
+
+```{r}
+predicted.Survived <- knn(titanic.train[,!(colnames(titanic.train) %in% c('Survived'))],titanic.test[,!(colnames(titanic.test) %in% c('Survived'))],titanic.train$Survived,k=5)
+misClasificError <- mean(predicted.Survived != titanic.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+We observe that the accuracy keeps improving.
+Let us try to find the optimum value of K.
+
+Code a for Loop to build the model from K=1 to 20 and record the error rate.
+```{r}
+predicted.Survived = NULL
+error.rate = NULL
+
+for(i in 1:20){
+    set.seed(101)
+    predicted.Survived <- knn(titanic.train[,!(colnames(titanic.train) %in% c('Survived'))],titanic.test[,!(colnames(titanic.test) %in% c('Survived'))],titanic.train$Survived,k=i)
+    error.rate[i] <-mean(predicted.Survived != titanic.test$Survived)
+}
+
+print(error.rate)
+```
+
+
+**bold** Elbow Method: **bold**
+
+We can plot out the various error rates for the K values. We should see an "elbow" indicating that we don't get a decrease in error rate for using a higher K. This is a good cut-off point:
+
+To plot some data, we need to have a data frame.
+Two columns - k value, error rate.
+
+```{r}
+library(ggplot2)
+k.values <- 1:20
+error.df <- data.frame(error.rate,k.values)
+error.df
+```
+
+Let us plot the K value Vs error Rate :
+
+```{r}
+ggplot(error.df,aes(x=k.values,y=error.rate)) + geom_point()+ geom_line(lty="dotted",color='red')
+```
+
+From the graph we observe that k=11 has the least error.
+So let us find the accuracy for k=11.
+
+```{r}
+predicted.Survived <- knn(titanic.train[,!(colnames(titanic.train) %in% c('Survived'))],titanic.test[,!(colnames(titanic.test) %in% c('Survived'))],titanic.train$Survived,k=11)
+    error.rate[i] <-mean(predicted.Survived != titanic.test$Survived)
+print(paste('Accuracy',1-misClasificError))
+```
+
+The Accuracy from the KNN classifier with K Value=13 is 70.5 %.
+
+## Conclusion:
+
+The summary of the accuracy from the different classifiers we have built:
+
+1. Logistic Regression - 78.3 %
+2. Decision Trees - 81.3 %
+3. Random Forest - 83.6 %
+4. KNN Classifier - 70.5 %
+
+Either we can conclude  that Random Forest is the best classifer in this case.
+
